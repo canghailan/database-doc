@@ -1,0 +1,1 @@
+pandoc -f markdown_github -t html a.md | pandoc -f html -t docx -o a.docx
