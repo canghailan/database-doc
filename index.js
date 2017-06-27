@@ -35,12 +35,13 @@ markdown.once('open', () => {
             let tableName = table.table_name;
 
             connection.query(columnQuery, [schema, tableName], (e, columns) => {
+                console.log(`${i + 1}\t${tableName}`);
                 if (e) throw e;
 
                 markdown.write(`## ${i + 1}、 ${tableName}\n`);
                 markdown.write(`${table.table_comment}\n\n`);
                 markdown.write(`| 序号 | 列名 | 类型 | 是否主键 | 是否可为空 | 说明 |  \n`);
-                markdown.write(`| - | - | - | - | - |  \n`);
+                markdown.write(`| - | - | - | - | - | - |  \n`);
                 columns.forEach((column, ii) => {
                     markdown.write(`| ${ii + 1} `);
                     markdown.write(`| ${column.column_name} `);
