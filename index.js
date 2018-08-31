@@ -2,62 +2,62 @@
 
 const fs = require('fs');
 const url = require('url');
-const querystring = require('querystring');
-const mysql = require('mysql');
 
 const args = process.argv.slice(2);
-let uri = url.parse(args.pop());
-let qs = querystring.parse(uri.query);
-let host = uri.host;
-let user = qs.user;
-let password = qs.password;
-let schema = uri.pathname.substring(1);
-let output = args.pop() || 'a.md';
+let uri = new url.URL(args[0]);
+let output = args[1] || 'a.md';
 
-const tableQuery = fs.readFileSync('table.sql', 'utf-8');
-const columnQuery = fs.readFileSync('column.sql', 'utf-8');
-
+const metadata = getMetadata(uri);
 const markdown = fs.createWriteStream(output);
-const connection = mysql.createConnection({
-    host: host,
-    user: user,
-    password: password
-});
 
+let timestamp = new Date();
 markdown.once('open', () => {
-    markdown.write(`# \n`);
-
-    connection.connect();
-    connection.query(tableQuery, [schema], (e, tables) => {
-        if (e) throw e;
-
-        tables.forEach((table, i) => {
-            let tableName = table.table_name;
-
-            connection.query(columnQuery, [schema, tableName], (e, columns) => {
-                console.log(`${i + 1}\t${tableName}`);
-                if (e) throw e;
-
-                markdown.write(`## ${i + 1}、 ${tableName}\n`);
-                markdown.write(`${table.table_comment}\n\n`);
-                markdown.write(`| 序号 | 列名 | 类型 | 是否主键 | 是否可为空 | 说明 |  \n`);
-                markdown.write(`| - | - | - | - | - | - |  \n`);
-                columns.forEach((column, ii) => {
-                    markdown.write(`| ${ii + 1} `);
-                    markdown.write(`| ${column.column_name} `);
-                    markdown.write(`| ${column.column_type} `);
-                    markdown.write(`| ${column.is_primary} `);
-                    markdown.write(`| ${column.is_nullable} `);
-                    markdown.write(`| ${column.column_comment} `);
-                    markdown.write(`|  \n`);
-                });
-                markdown.write(`\n\n`);
-
-                if (i == tables.length - 1) {
-                    connection.end();
-                    markdown.end();
-                }
-            });
-        });
+    metadata.connect();
+    generate(metadata, markdown).then(() => {
+        metadata.disconnect();
+        markdown.end();
+        console.log(`OK ${(new Date().getTime() - timestamp.getTime()) / 1000}s`);
+    }, (e) => {
+        metadata.disconnect();
+        markdown.end();
+        console.error(e);
+        process.exit(1);
     });
 });
+
+function getMetadata(uri) {
+    switch (uri.protocol) {
+        case 'mysql:': {
+            const MySQLMetadata = require('./mysql');
+            return new MySQLMetadata(uri);
+        }
+        default: {
+            console.error(`unsupported database: ${uri}`);
+            process.exit(1);
+        }
+    }
+}
+
+async function generate(metadata, markdown) {
+    markdown.write(`# \n`);
+
+    let tables = await metadata.tables();
+    return Promise.all(tables.map(async (table, i) => {
+        let columns = await metadata.columns(table.table_name);
+
+        markdown.write(`## ${i + 1}、 ${table.table_name}\n`);
+        markdown.write(`${table.table_comment}\n\n`);
+        markdown.write(`| 序号 | 列名 | 类型 | 是否主键 | 是否可为空 | 说明 |  \n`);
+        markdown.write(`| - | - | - | - | - | - |  \n`);
+        columns.forEach((column) => {
+            markdown.write(`| ${column.ordinal_position} `);
+            markdown.write(`| ${column.column_name} `);
+            markdown.write(`| ${column.column_type} `);
+            markdown.write(`| ${column.is_primary} `);
+            markdown.write(`| ${column.is_nullable} `);
+            markdown.write(`| ${column.column_comment} `);
+            markdown.write(`|  \n`);
+        });
+        markdown.write(`\n\n`);
+    }));
+}
